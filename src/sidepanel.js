@@ -5,7 +5,7 @@ import { contentToParagraphs } from "./lib/parse.js";
 import { BUILDERS, safeName } from "./lib/formats/index.js";
 import { buildCBZ, buildMangaPDF } from "./lib/formats/manga.js";
 import { fetchImage, toJpegPage, splitToJpegPages } from "./lib/img.js";
-import { supportsFSAccess, pickDirectory, getSavedDirectory, clearDirectory, saveBlob } from "./lib/fs.js";
+import { saveBlob, destinationLabel } from "./lib/fs.js";
 import { loadSettings, saveSettings, DEFAULTS } from "./lib/settings.js";
 
 const FORMATS = {
@@ -105,7 +105,6 @@ function renderBook() {
   show($("chapters-section"), true);
   show($("format-section"), true);
   show($("settings-section"), true);
-  show($("folder-section"), true);
   show($("footer"), true);
 }
 
@@ -218,13 +217,16 @@ function applySelectionToCheckboxes() {
 // ---------- загрузка данных ----------
 async function detectAndLoad() {
   setStatus("Определяю вкладку…");
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  let tab;
+  try { [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); }
+  catch { tab = null; }
   const ctx = tab ? parseTab(tab.url || "") : null;
+  lastKey = ctxKey(ctx);
   if (!ctx || !ctx.slug) {
+    state.ctx = null;
     show($("book-card"), false);
     show($("branch-section"), false); show($("chapters-section"), false);
     show($("format-section"), false); show($("settings-section"), false);
-    show($("folder-section"), false);
     show($("footer"), false);
     show($("empty-hint"), true);
     setStatus("");
@@ -320,9 +322,8 @@ async function downloadNovel(nums, formats, bar) {
       }
     }
     bar.style.width = "100%";
-    const method = saved[0]?.method === "fs" ? `папку «${sub}»` : "Загрузки";
-    const skip = skipped ? ` (пропущено платных: ${skipped})` : "";
-    setStatus(`Готово! Сохранено в ${method}. Файлов: ${saved.length}${skip}`, "ok");
+    const skip = skipped ? ` · пропущено платных: ${skipped}` : "";
+    setStatus(`Готово · файлов: ${saved.length}${skip} · в «${destinationLabel(titleStr)}»`, "ok");
   }
 }
 
@@ -392,23 +393,8 @@ async function downloadManga(nums, formats, bar) {
   }
 
   bar.style.width = "100%";
-  const where = lastMethod === "fs" ? `папку «${sub}»` : "Загрузки";
-  const skip = skipped ? ` (пропущено платных: ${skipped})` : "";
-  setStatus(`Готово! Сохранено в ${where}. Глав: ${totalChapters - skipped}${skip}`, "ok");
-}
-
-// ---------- папка ----------
-async function refreshFolderLabel() {
-  if (!supportsFSAccess()) {
-    $("folder-name").textContent = "Загрузки (этот браузер)";
-    show($("fs-note"), true);
-    $("pick-folder").disabled = true;
-    show($("reset-folder"), false);
-    return;
-  }
-  const dir = await getSavedDirectory();
-  $("folder-name").textContent = dir ? dir.name : "не выбрана → Загрузки";
-  show($("reset-folder"), !!dir);
+  const skip = skipped ? ` · пропущено платных: ${skipped}` : "";
+  setStatus(`Готово · глав: ${totalChapters - skipped}${skip} · в «${destinationLabel(titleStr)}»`, "ok");
 }
 
 // ---------- события ----------
@@ -429,16 +415,7 @@ $("apply-range").addEventListener("click", () => {
     .filter(c => c.numberFloat >= lo && c.numberFloat <= hi).map(c => c.number));
   applySelectionToCheckboxes();
 });
-$("pick-folder").addEventListener("click", async () => {
-  try { await pickDirectory(); await refreshFolderLabel(); setStatus("Папка выбрана", "ok"); }
-  catch { /* отмена */ }
-});
-$("reset-folder").addEventListener("click", async () => {
-  await clearDirectory(); await refreshFolderLabel();
-  setStatus("Файлы будут сохраняться в «Загрузки»", "ok");
-});
 $("download-btn").addEventListener("click", doDownload);
-$("reload-tab").addEventListener("click", detectAndLoad);
 
 // ---------- настройки ----------
 function bindSettingsUI() {
@@ -472,11 +449,37 @@ function bindSettingsUI() {
   });
 }
 
+// ---------- авто-обновление при переходах между тайтлами ----------
+let lastKey = "__init__";
+function ctxKey(ctx) {
+  return ctx && ctx.slug ? `${ctx.site.id}:${ctx.slug}` : "none";
+}
+async function maybeReload() {
+  let tab;
+  try { [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); }
+  catch { return; }
+  const ctx = tab ? parseTab(tab.url || "") : null;
+  const key = ctxKey(ctx);
+  if (key === lastKey) return;     // тайтл/сайт не изменился — не дёргаем
+  lastKey = key;
+  await detectAndLoad();
+}
+function bindAutoRefresh() {
+  if (typeof chrome === "undefined" || !chrome.tabs) return;
+  let t = null;
+  const debounced = () => { clearTimeout(t); t = setTimeout(maybeReload, 250); };
+  chrome.tabs.onActivated.addListener(debounced);
+  chrome.tabs.onUpdated.addListener((_id, info) => {
+    if (info.url || info.status === "complete") debounced();
+  });
+}
+
 // старт
 (async () => {
   state.settings = await loadSettings();
   setRateLimit(state.settings.rpm);
   bindSettingsUI();
-  await refreshFolderLabel();
+  bindAutoRefresh();
+  lastKey = "__init__";
   await detectAndLoad();
 })();

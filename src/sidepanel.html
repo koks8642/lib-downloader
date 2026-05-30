@@ -27,9 +27,9 @@
     </section>
 
     <section id="empty-hint" class="card hint">
-      <p>Откройте страницу тайтла на одном из сайтов группы&nbsp;Lib
-        (RanobeLib, MangaLib и&nbsp;др.) — панель сама всё подхватит.</p>
-      <button id="reload-tab" class="btn ghost small">Проверить вкладку</button>
+      <div class="hint-ico">📚</div>
+      <p>Откройте страницу тайтла на RanobeLib, MangaLib или другом сайте
+        группы&nbsp;Lib — панель подхватит книгу автоматически.</p>
     </section>
 
     <!-- Переводчик -->
@@ -79,7 +79,7 @@
       </button>
       <div id="settings-body" class="settings-body hidden">
         <label class="set-row">
-          <span>Лимит запросов/мин <span class="muted">(0 = без лимита)</span></span>
+          <span>Лимит запросов/мин <span class="faint">0 = без лимита</span></span>
           <input type="number" id="set-rpm" class="num" min="0" step="10">
         </label>
         <label class="set-row">
@@ -90,20 +90,8 @@
           <input type="checkbox" id="set-autocrop">
           <span>Резать длинные страницы манхвы (для читалок)</span>
         </label>
+        <p class="dest-hint">Файлы сохраняются в <b>Загрузки / Lib Downloader / &lt;название&gt;</b></p>
       </div>
-    </section>
-
-    <!-- Папка -->
-    <section id="folder-section" class="card hidden">
-      <label class="field-label">Папка сохранения</label>
-      <div class="row between gap">
-        <span id="folder-name" class="folder-name muted">не выбрана → Загрузки</span>
-        <div class="row gap">
-          <button id="reset-folder" class="btn ghost small hidden">В Загрузки</button>
-          <button id="pick-folder" class="btn ghost small">Выбрать…</button>
-        </div>
-      </div>
-      <p id="fs-note" class="note hidden">Этот браузер не умеет выбирать папку — файлы пойдут в «Загрузки».</p>
     </section>
   </main>
 
