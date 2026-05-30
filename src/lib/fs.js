@@ -41,6 +41,11 @@ export async function getSavedDirectory() {
   try { return (await idbGet(KEY)) || null; } catch { return null; }
 }
 
+// Сбросить выбранную папку (вернуться к «Загрузкам») без открытия диалога.
+export async function clearDirectory() {
+  try { await idbSet(KEY, null); } catch { /* ignore */ }
+}
+
 async function ensurePermission(handle) {
   const opts = { mode: "readwrite" };
   if ((await handle.queryPermission(opts)) === "granted") return true;

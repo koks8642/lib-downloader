@@ -18,7 +18,7 @@
   <main>
     <!-- Карточка книги / подсказка -->
     <section id="book-card" class="card book-card hidden">
-      <img id="book-cover" class="cover" alt="">
+      <img id="book-cover" class="cover" alt="" referrerpolicy="no-referrer">
       <div class="book-meta">
         <div id="book-title" class="book-title">—</div>
         <div id="book-sub" class="book-sub"></div>
@@ -98,7 +98,10 @@
       <label class="field-label">Папка сохранения</label>
       <div class="row between gap">
         <span id="folder-name" class="folder-name muted">не выбрана → Загрузки</span>
-        <button id="pick-folder" class="btn ghost small">Выбрать…</button>
+        <div class="row gap">
+          <button id="reset-folder" class="btn ghost small hidden">В Загрузки</button>
+          <button id="pick-folder" class="btn ghost small">Выбрать…</button>
+        </div>
       </div>
       <p id="fs-note" class="note hidden">Этот браузер не умеет выбирать папку — файлы пойдут в «Загрузки».</p>
     </section>

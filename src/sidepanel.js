@@ -5,7 +5,7 @@ import { contentToParagraphs } from "./lib/parse.js";
 import { BUILDERS, safeName } from "./lib/formats/index.js";
 import { buildCBZ, buildMangaPDF } from "./lib/formats/manga.js";
 import { fetchImage, toJpegPage, splitToJpegPages } from "./lib/img.js";
-import { supportsFSAccess, pickDirectory, getSavedDirectory, saveBlob } from "./lib/fs.js";
+import { supportsFSAccess, pickDirectory, getSavedDirectory, clearDirectory, saveBlob } from "./lib/fs.js";
 import { loadSettings, saveSettings, DEFAULTS } from "./lib/settings.js";
 
 const FORMATS = {
@@ -98,9 +98,8 @@ function renderBook() {
   if (b?.eng_name) sub.push(b.eng_name);
   $("book-sub").textContent = sub.join(" · ");
   $("site-badge").textContent = ctx.site.name + (ctx.site.kind === "manga" ? " · манга" : "");
-  const cover = b?.cover?.default || b?.cover?.thumbnail || b?.background?.url;
-  if (cover) { $("book-cover").src = cover; show($("book-cover"), true); }
-  else show($("book-cover"), false);
+  const cover = b?.cover?.default || b?.cover?.thumbnail || b?.cover?.md || b?.background?.url;
+  loadCover(cover);
 
   show($("branch-section"), true);
   show($("chapters-section"), true);
@@ -126,6 +125,25 @@ function renderBranches() {
   state.bid = initial;
 }
 
+// Грузим обложку через fetch→blob (host_permissions снимают CORS/referer-защиту),
+// с фолбэком на прямой src. Прячем, если не вышло.
+async function loadCover(url) {
+  const img = $("book-cover");
+  if (!url) { show(img, false); return; }
+  try {
+    const r = await fetch(url, { referrerPolicy: "no-referrer" });
+    if (!r.ok) throw new Error();
+    const blob = await r.blob();
+    if (img._url) URL.revokeObjectURL(img._url);
+    img._url = URL.createObjectURL(blob);
+    img.src = img._url; show(img, true);
+  } catch {
+    img.onerror = () => show(img, false);
+    img.onload = () => show(img, true);
+    img.src = url; show(img, true);
+  }
+}
+
 function lockTitle(ch) {
   if (!ch.lockedUntil) return "Платно / ранний доступ — недоступно для скачивания";
   const d = new Date(ch.lockedUntil);
@@ -138,6 +156,7 @@ function renderChapters() {
   state.selected.clear();
   const ul = $("chapter-list");
   ul.innerHTML = "";
+  const frag = document.createDocumentFragment();
   const lockedCount = state.view.filter(c => c.locked).length;
   for (const ch of state.view) {
     const li = document.createElement("li");
@@ -170,8 +189,9 @@ function renderChapters() {
       lbl.append(cb, num, name);
       li.appendChild(lbl);
     }
-    ul.appendChild(li);
+    frag.appendChild(li);
   }
+  ul.appendChild(frag);
   $("select-all").checked = false;
   $("range-from").value = ""; $("range-to").value = "";
   // подпись о платных главах
@@ -383,10 +403,12 @@ async function refreshFolderLabel() {
     $("folder-name").textContent = "Загрузки (этот браузер)";
     show($("fs-note"), true);
     $("pick-folder").disabled = true;
+    show($("reset-folder"), false);
     return;
   }
   const dir = await getSavedDirectory();
   $("folder-name").textContent = dir ? dir.name : "не выбрана → Загрузки";
+  show($("reset-folder"), !!dir);
 }
 
 // ---------- события ----------
@@ -410,6 +432,10 @@ $("apply-range").addEventListener("click", () => {
 $("pick-folder").addEventListener("click", async () => {
   try { await pickDirectory(); await refreshFolderLabel(); setStatus("Папка выбрана", "ok"); }
   catch { /* отмена */ }
+});
+$("reset-folder").addEventListener("click", async () => {
+  await clearDirectory(); await refreshFolderLabel();
+  setStatus("Файлы будут сохраняться в «Загрузки»", "ok");
 });
 $("download-btn").addEventListener("click", doDownload);
 $("reload-tab").addEventListener("click", detectAndLoad);
