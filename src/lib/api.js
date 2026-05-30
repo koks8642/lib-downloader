@@ -8,10 +8,58 @@ function headers(siteId) {
   };
 }
 
-async function getJSON(url, siteId) {
-  const r = await fetch(url, { headers: headers(siteId) });
-  if (!r.ok) throw new Error(`HTTP ${r.status} для ${url}`);
-  return r.json();
+// Ошибка заблокированной (платной/раннего доступа) главы.
+export class LockedError extends Error {
+  constructor(msg) { super(msg || "Глава недоступна (ранний доступ)"); this.name = "LockedError"; this.locked = true; }
+}
+
+// --- Ограничитель частоты запросов: не более N запросов в минуту,
+//     с минимальным интервалом, и ретраями на 429. ---
+const limiter = {
+  minIntervalMs: 0,      // вычисляется из rpm
+  _last: 0,
+  setRpm(rpm) { this.minIntervalMs = rpm > 0 ? Math.ceil(60000 / rpm) : 0; },
+  async wait() {
+    if (!this.minIntervalMs) return;
+    const now = Date.now();
+    const gap = this._last + this.minIntervalMs - now;
+    if (gap > 0) await new Promise(r => setTimeout(r, gap));
+    this._last = Date.now();
+  },
+};
+export function setRateLimit(rpm) { limiter.setRpm(rpm); }
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function getJSON(url, siteId, { retries = 3 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    await limiter.wait();
+    let r;
+    try {
+      r = await fetch(url, { headers: headers(siteId) });
+    } catch (e) {
+      if (attempt < retries) { await sleep(800 * (attempt + 1)); continue; }
+      throw e;
+    }
+    if (r.status === 429) {
+      // сервер просит подождать
+      const ra = Number(r.headers.get("retry-after")) || (2 * (attempt + 1));
+      if (attempt < retries) { await sleep(ra * 1000); continue; }
+      throw new Error("429: слишком много запросов");
+    }
+    if (!r.ok) {
+      if (r.status >= 500 && attempt < retries) { await sleep(800 * (attempt + 1)); continue; }
+      throw new Error(`HTTP ${r.status}`);
+    }
+    // Заблокированные главы отдают HTML вместо JSON.
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("json")) {
+      const text = await r.text();
+      if (text.trimStart().startsWith("<")) throw new LockedError();
+      try { return JSON.parse(text); } catch { throw new LockedError(); }
+    }
+    return r.json();
+  }
 }
 
 // Инфо о книге (название, обложка). Пробуем дотянуть автора/описание через
@@ -52,19 +100,34 @@ export function branchesFromChapters(chapters) {
   return [...map.values()].sort((a, b) => b.count - a.count);
 }
 
+// Определить, заблокирована ли ветка (платный ранний доступ).
+function branchLock(br) {
+  const rv = br && br.restricted_view;
+  if (rv && rv.is_open === false) {
+    return { locked: true, until: rv.expired_at || null };
+  }
+  return { locked: false, until: null };
+}
+
 // Главы, относящиеся к выбранной ветке (bid). Если bid == null — берём все.
+// Каждая глава получает флаг locked (нельзя скачать — ранний доступ/платно).
 export function chaptersForBranch(chapters, bid) {
   return chapters
-    .filter(ch =>
-      bid == null ||
-      (ch.branches || []).some(br => br.branch_id === bid))
-    .map(ch => ({
-      number: ch.number,
-      numberFloat: parseFloat(ch.number),
-      volume: ch.volume ?? "1",
-      name: ch.name || "",
-      id: ch.id,
-    }))
+    .map(ch => {
+      const br = (ch.branches || []).find(b => bid == null || b.branch_id === bid);
+      if (bid != null && !br) return null;
+      const lock = branchLock(br || (ch.branches || [])[0]);
+      return {
+        number: ch.number,
+        numberFloat: parseFloat(ch.number),
+        volume: ch.volume ?? "1",
+        name: ch.name || "",
+        id: ch.id,
+        locked: lock.locked,
+        lockedUntil: lock.until,
+      };
+    })
+    .filter(Boolean)
     .sort((a, b) => (a.numberFloat - b.numberFloat) || 0);
 }
 
