@@ -60,6 +60,7 @@
       </div>
 
       <ul id="chapter-list" class="chapter-list"></ul>
+      <p id="locked-note" class="note locked-note hidden"></p>
     </section>
 
     <!-- Форматы -->
@@ -69,6 +70,27 @@
       <label class="check inline mt hidden" id="per-chapter-wrap">
         <input type="checkbox" id="txt-per-chapter"><span>TXT — отдельным файлом на главу</span>
       </label>
+    </section>
+
+    <!-- Настройки -->
+    <section id="settings-section" class="card hidden">
+      <button id="settings-toggle" class="settings-toggle" type="button">
+        <span>Настройки</span><span class="chevron">⌄</span>
+      </button>
+      <div id="settings-body" class="settings-body hidden">
+        <label class="set-row">
+          <span>Лимит запросов/мин <span class="muted">(0 = без лимита)</span></span>
+          <input type="number" id="set-rpm" class="num" min="0" step="10">
+        </label>
+        <label class="set-row">
+          <span>Качество JPEG <span id="set-quality-val" class="muted"></span></span>
+          <input type="range" id="set-quality" min="50" max="100" step="5" class="range">
+        </label>
+        <label class="check inline">
+          <input type="checkbox" id="set-autocrop">
+          <span>Резать длинные страницы манхвы (для читалок)</span>
+        </label>
+      </div>
     </section>
 
     <!-- Папка -->

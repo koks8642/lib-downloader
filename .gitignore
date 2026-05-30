@@ -1,5 +1,8 @@
 # Тестовые артефакты и черновики
 _dev/
+itest.html
+dist/
+*.err
 
 # OS
 Thumbs.db

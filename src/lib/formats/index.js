@@ -7,6 +7,7 @@
 // }
 
 import { makeZip } from "../zip.js";
+import { buildMOBI } from "./mobi.js";
 
 const xml = (s) => String(s).replace(/[<>&"']/g, c =>
   ({ "<":"&lt;", ">":"&gt;", "&":"&amp;", '"':"&quot;", "'":"&apos;" }[c]));
@@ -164,6 +165,7 @@ export const BUILDERS = {
   json: buildJSON,
   fb2:  buildFB2,
   epub: buildEPUB,
+  mobi: buildMOBI,
 };
 
 export { safeName };

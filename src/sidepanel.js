@@ -1,17 +1,18 @@
 import { parseTab } from "./lib/sites.js";
 import { fetchBook, fetchChapters, branchesFromChapters, chaptersForBranch, fetchChapter,
-         fetchImageServer, pageUrls } from "./lib/api.js";
+         fetchImageServer, pageUrls, setRateLimit, LockedError } from "./lib/api.js";
 import { contentToParagraphs } from "./lib/parse.js";
 import { BUILDERS, safeName } from "./lib/formats/index.js";
 import { buildCBZ, buildMangaPDF } from "./lib/formats/manga.js";
-import { fetchImage, toJpegPage } from "./lib/img.js";
+import { fetchImage, toJpegPage, splitToJpegPages } from "./lib/img.js";
 import { supportsFSAccess, pickDirectory, getSavedDirectory, saveBlob } from "./lib/fs.js";
+import { loadSettings, saveSettings, DEFAULTS } from "./lib/settings.js";
 
 const FORMATS = {
   novel: [
     { v: "epub", label: "EPUB", def: true },
-    { v: "txt", label: "TXT" },
     { v: "fb2", label: "FB2" },
+    { v: "txt", label: "TXT" },
     { v: "json", label: "JSON" },
   ],
   manga: [
@@ -44,9 +45,13 @@ const state = {
   allChapters: [],  // полный список глав API
   branches: [],     // [{bid,name,count}]
   bid: null,
-  view: [],         // главы текущей ветки [{number,numberFloat,volume,name}]
+  view: [],         // главы текущей ветки [{number,numberFloat,volume,name,locked}]
   selected: new Set(), // ключи выбранных глав (number)
+  settings: { ...DEFAULTS },
 };
+
+// доступные (не заблокированные) главы текущей ветки
+function freeChapters() { return state.view.filter(c => !c.locked); }
 
 // ---------- утилиты UI ----------
 function show(el, on = true) { el.classList.toggle("hidden", !on); }
@@ -100,6 +105,7 @@ function renderBook() {
   show($("branch-section"), true);
   show($("chapters-section"), true);
   show($("format-section"), true);
+  show($("settings-section"), true);
   show($("folder-section"), true);
   show($("footer"), true);
 }
@@ -120,40 +126,72 @@ function renderBranches() {
   state.bid = initial;
 }
 
+function lockTitle(ch) {
+  if (!ch.lockedUntil) return "Платно / ранний доступ — недоступно для скачивания";
+  const d = new Date(ch.lockedUntil);
+  const date = isNaN(d) ? "" : d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return date ? `Ранний доступ — откроется ${date}` : "Ранний доступ — недоступно";
+}
+
 function renderChapters() {
   state.view = chaptersForBranch(state.allChapters, state.bid);
   state.selected.clear();
   const ul = $("chapter-list");
   ul.innerHTML = "";
+  const lockedCount = state.view.filter(c => c.locked).length;
   for (const ch of state.view) {
     const li = document.createElement("li");
-    const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.dataset.num = ch.number;
-    cb.addEventListener("change", () => {
-      if (cb.checked) state.selected.add(ch.number); else state.selected.delete(ch.number);
-      $("select-all").checked = state.selected.size === state.view.length;
-      updateCount();
-    });
+    if (ch.locked) li.classList.add("locked");
+
     const num = document.createElement("span");
     num.className = "ch-num"; num.textContent = ch.number;
     const name = document.createElement("span");
     name.className = "ch-name"; name.textContent = ch.name || "";
+
     const lbl = document.createElement("label");
     lbl.className = "check"; lbl.style.flex = "1"; lbl.style.gap = "8px";
-    lbl.append(cb, num, name);
-    li.appendChild(lbl);
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.dataset.num = ch.number;
+    if (ch.locked) {
+      cb.disabled = true;
+      lbl.append(cb, num, name);
+      const lock = document.createElement("span");
+      lock.className = "ch-lock"; lock.textContent = "🔒";
+      lock.title = lockTitle(ch);
+      li.title = lockTitle(ch);
+      li.append(lbl, lock);
+    } else {
+      cb.addEventListener("change", () => {
+        if (cb.checked) state.selected.add(ch.number); else state.selected.delete(ch.number);
+        syncSelectAll();
+        updateCount();
+      });
+      lbl.append(cb, num, name);
+      li.appendChild(lbl);
+    }
     ul.appendChild(li);
   }
   $("select-all").checked = false;
   $("range-from").value = ""; $("range-to").value = "";
+  // подпись о платных главах
+  const note = $("locked-note");
+  if (lockedCount > 0) { note.textContent = `🔒 ${lockedCount} глав(ы) недоступно (ранний доступ)`; show(note, true); }
+  else show(note, false);
   updateCount();
+}
+
+function syncSelectAll() {
+  const free = freeChapters().length;
+  $("select-all").checked = free > 0 && state.selected.size === free;
 }
 
 function applySelectionToCheckboxes() {
   for (const cb of document.querySelectorAll('#chapter-list input[type="checkbox"]')) {
+    if (cb.disabled) continue;
     cb.checked = state.selected.has(cb.dataset.num);
   }
-  $("select-all").checked = state.selected.size === state.view.length && state.view.length > 0;
+  syncSelectAll();
   updateCount();
 }
 
@@ -165,7 +203,8 @@ async function detectAndLoad() {
   if (!ctx || !ctx.slug) {
     show($("book-card"), false);
     show($("branch-section"), false); show($("chapters-section"), false);
-    show($("format-section"), false); show($("folder-section"), false);
+    show($("format-section"), false); show($("settings-section"), false);
+    show($("folder-section"), false);
     show($("footer"), false);
     show($("empty-hint"), true);
     setStatus("");
@@ -215,17 +254,26 @@ async function doDownload() {
 }
 
 async function downloadNovel(nums, formats, bar) {
+  nums = nums.filter(c => !c.locked);
   const chaptersData = [];
+  let skipped = 0;
   {
     for (let i = 0; i < nums.length; i++) {
       const ch = nums[i];
       setStatus(`Глава ${ch.number} (${i + 1}/${nums.length})…`);
-      const data = await fetchChapter(state.ctx.slug, state.ctx.site.id,
-        { number: ch.number, volume: ch.volume, bid: state.bid });
+      let data;
+      try {
+        data = await fetchChapter(state.ctx.slug, state.ctx.site.id,
+          { number: ch.number, volume: ch.volume, bid: state.bid });
+      } catch (e) {
+        if (e instanceof LockedError) { skipped++; continue; }
+        throw e;
+      }
       const paras = contentToParagraphs(data.content);
       chaptersData.push({ number: ch.number, name: ch.name || data.name || "", paragraphs: paras });
       bar.style.width = `${Math.round(((i + 1) / nums.length) * 85)}%`;
     }
+    if (!chaptersData.length) { setStatus("Нечего сохранять (все выбранные главы недоступны)", "err"); return; }
 
     const titleStr = state.book?.rus_name || state.book?.name || state.ctx.slug;
     const book = {
@@ -253,18 +301,20 @@ async function downloadNovel(nums, formats, bar) {
     }
     bar.style.width = "100%";
     const method = saved[0]?.method === "fs" ? `папку «${sub}»` : "Загрузки";
-    setStatus(`Готово! Сохранено в ${method}. Файлов: ${saved.length}`, "ok");
+    const skip = skipped ? ` (пропущено платных: ${skipped})` : "";
+    setStatus(`Готово! Сохранено в ${method}. Файлов: ${saved.length}${skip}`, "ok");
   }
 }
 
 // Манга/манхва: по главам тянем картинки и пакуем в CBZ/PDF/исходники.
 async function downloadManga(nums, formats, bar) {
+  nums = nums.filter(c => !c.locked);
   const { slug, site } = state.ctx;
   const titleStr = state.book?.rus_name || state.book?.name || slug;
   const sub = safeName(titleStr);
   const server = await fetchImageServer(site.id);
 
-  let savedCount = 0, lastMethod = "fs";
+  let savedCount = 0, lastMethod = "fs", skipped = 0;
   const totalChapters = nums.length;
 
   for (let i = 0; i < totalChapters; i++) {
@@ -272,8 +322,14 @@ async function downloadManga(nums, formats, bar) {
     const padNum = String(parseFloat(ch.number)).padStart(3, "0");
     setStatus(`Глава ${ch.number} (${i + 1}/${totalChapters}) — страницы…`);
 
-    const data = await fetchChapter(slug, site.id,
-      { number: ch.number, volume: ch.volume, bid: state.bid });
+    let data;
+    try {
+      data = await fetchChapter(slug, site.id,
+        { number: ch.number, volume: ch.volume, bid: state.bid });
+    } catch (e) {
+      if (e instanceof LockedError) { skipped++; continue; }
+      throw e;
+    }
     const urls = pageUrls(data, server);
 
     // качаем все страницы главы
@@ -298,8 +354,17 @@ async function downloadManga(nums, formats, bar) {
         }
         savedCount++;
       } else if (fmt === "pdf") {
+        const q = (state.settings.jpegQuality || 90) / 100;
         const jpegPages = [];
-        for (const img of images) jpegPages.push(await toJpegPage(img.bytes, img.type));
+        for (const img of images) {
+          if (state.settings.autocrop) {
+            const parts = await splitToJpegPages(img.bytes, img.type,
+              { enabled: true, ratio: state.settings.autocropRatio, quality: q });
+            jpegPages.push(...parts);
+          } else {
+            jpegPages.push(await toJpegPage(img.bytes, img.type, q));
+          }
+        }
         const { filename, blob } = buildMangaPDF(jpegPages, base);
         const r = await saveBlob(blob, filename, sub); lastMethod = r.method; savedCount++;
       }
@@ -308,7 +373,8 @@ async function downloadManga(nums, formats, bar) {
 
   bar.style.width = "100%";
   const where = lastMethod === "fs" ? `папку «${sub}»` : "Загрузки";
-  setStatus(`Готово! Сохранено в ${where}. Глав: ${totalChapters}`, "ok");
+  const skip = skipped ? ` (пропущено платных: ${skipped})` : "";
+  setStatus(`Готово! Сохранено в ${where}. Глав: ${totalChapters - skipped}${skip}`, "ok");
 }
 
 // ---------- папка ----------
@@ -329,7 +395,7 @@ $("branch-select").addEventListener("change", (e) => {
   renderChapters();
 });
 $("select-all").addEventListener("change", (e) => {
-  state.selected = e.target.checked ? new Set(state.view.map(c => c.number)) : new Set();
+  state.selected = e.target.checked ? new Set(freeChapters().map(c => c.number)) : new Set();
   applySelectionToCheckboxes();
 });
 $("apply-range").addEventListener("click", () => {
@@ -337,7 +403,8 @@ $("apply-range").addEventListener("click", () => {
   const to = parseFloat($("range-to").value);
   const lo = isNaN(from) ? -Infinity : from;
   const hi = isNaN(to) ? Infinity : to;
-  state.selected = new Set(state.view.filter(c => c.numberFloat >= lo && c.numberFloat <= hi).map(c => c.number));
+  state.selected = new Set(freeChapters()
+    .filter(c => c.numberFloat >= lo && c.numberFloat <= hi).map(c => c.number));
   applySelectionToCheckboxes();
 });
 $("pick-folder").addEventListener("click", async () => {
@@ -347,6 +414,43 @@ $("pick-folder").addEventListener("click", async () => {
 $("download-btn").addEventListener("click", doDownload);
 $("reload-tab").addEventListener("click", detectAndLoad);
 
+// ---------- настройки ----------
+function bindSettingsUI() {
+  const s = state.settings;
+  $("set-rpm").value = s.rpm;
+  $("set-quality").value = s.jpegQuality;
+  $("set-quality-val").textContent = s.jpegQuality + "%";
+  $("set-autocrop").checked = s.autocrop;
+
+  const persist = async () => {
+    state.settings = await saveSettings(state.settings);
+    setRateLimit(state.settings.rpm);
+  };
+  $("set-rpm").addEventListener("change", async () => {
+    const v = Math.max(0, parseInt($("set-rpm").value) || 0);
+    state.settings.rpm = v; $("set-rpm").value = v; await persist();
+  });
+  $("set-quality").addEventListener("input", () => {
+    $("set-quality-val").textContent = $("set-quality").value + "%";
+  });
+  $("set-quality").addEventListener("change", async () => {
+    state.settings.jpegQuality = parseInt($("set-quality").value); await persist();
+  });
+  $("set-autocrop").addEventListener("change", async () => {
+    state.settings.autocrop = $("set-autocrop").checked; await persist();
+  });
+  $("settings-toggle").addEventListener("click", () => {
+    const body = $("settings-body");
+    show(body, body.classList.contains("hidden"));
+    $("settings-toggle").classList.toggle("open");
+  });
+}
+
 // старт
-refreshFolderLabel();
-detectAndLoad();
+(async () => {
+  state.settings = await loadSettings();
+  setRateLimit(state.settings.rpm);
+  bindSettingsUI();
+  await refreshFolderLabel();
+  await detectAndLoad();
+})();
