@@ -1,8 +1,41 @@
 import { parseTab } from "./lib/sites.js";
-import { fetchBook, fetchChapters, branchesFromChapters, chaptersForBranch, fetchChapter } from "./lib/api.js";
+import { fetchBook, fetchChapters, branchesFromChapters, chaptersForBranch, fetchChapter,
+         fetchImageServer, pageUrls } from "./lib/api.js";
 import { contentToParagraphs } from "./lib/parse.js";
 import { BUILDERS, safeName } from "./lib/formats/index.js";
+import { buildCBZ, buildMangaPDF } from "./lib/formats/manga.js";
+import { fetchImage, toJpegPage } from "./lib/img.js";
 import { supportsFSAccess, pickDirectory, getSavedDirectory, saveBlob } from "./lib/fs.js";
+
+const FORMATS = {
+  novel: [
+    { v: "epub", label: "EPUB", def: true },
+    { v: "txt", label: "TXT" },
+    { v: "fb2", label: "FB2" },
+    { v: "json", label: "JSON" },
+  ],
+  manga: [
+    { v: "cbz", label: "CBZ", def: true },
+    { v: "pdf", label: "PDF" },
+    { v: "images", label: "Картинки" },
+  ],
+};
+
+// Затемнить hex-цвет на коэффициент k (0..1).
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * (1 - k));
+  const g = Math.round(((n >> 8) & 255) * (1 - k));
+  const b = Math.round((n & 255) * (1 - k));
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+function applyTheme(color) {
+  if (!color) return;
+  const root = document.documentElement.style;
+  root.setProperty("--accent", color);
+  root.setProperty("--accent-press", shade(color, 0.15));
+  root.setProperty("--accent-soft", color + "22"); // ~13% alpha
+}
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -24,18 +57,35 @@ function setStatus(msg, kind = "") {
 function updateCount() {
   $("selected-count").textContent = `${state.selected.size} выбрано`;
   const formats = selectedFormats();
-  const can = state.selected.size > 0 && formats.length > 0 && state.ctx?.site?.kind === "novel";
+  const can = state.selected.size > 0 && formats.length > 0;
   $("download-btn").disabled = !can;
   $("download-btn").textContent = state.selected.size
     ? `Скачать (${state.selected.size})` : "Скачать";
 }
 function selectedFormats() {
-  return [...document.querySelectorAll('#format-section .formats input:checked')].map(i => i.value);
+  return [...document.querySelectorAll('#formats input:checked')].map(i => i.value);
+}
+function renderFormats(kind) {
+  const wrap = $("formats");
+  wrap.innerHTML = "";
+  for (const f of FORMATS[kind] || FORMATS.novel) {
+    const lbl = document.createElement("label");
+    lbl.className = "check chip";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = f.v; cb.checked = !!f.def;
+    cb.addEventListener("change", updateCount);
+    const sp = document.createElement("span"); sp.textContent = f.label;
+    lbl.append(cb, sp);
+    wrap.appendChild(lbl);
+  }
+  show($("per-chapter-wrap"), kind === "novel");
 }
 
 // ---------- рендер ----------
 function renderBook() {
   const b = state.book, ctx = state.ctx;
+  applyTheme(ctx.site.color);
+  renderFormats(ctx.site.kind);
   show($("empty-hint"), false);
   show($("book-card"), true);
   $("book-title").textContent = b?.rus_name || b?.name || ctx.slug;
@@ -52,10 +102,6 @@ function renderBook() {
   show($("format-section"), true);
   show($("folder-section"), true);
   show($("footer"), true);
-
-  if (ctx.site.kind === "manga") {
-    setStatus("Манга определена. Скачивание манги — в следующем обновлении.", "");
-  }
 }
 
 function renderBranches() {
@@ -154,9 +200,23 @@ async function doDownload() {
   $("download-btn").disabled = true;
   show($("progress-wrap"), true);
   const bar = $("progress-bar");
-  const chaptersData = [];
-
   try {
+    if (state.ctx.site.kind === "manga") {
+      await downloadManga(nums, formats, bar);
+    } else {
+      await downloadNovel(nums, formats, bar);
+    }
+  } catch (e) {
+    setStatus("Ошибка: " + e.message, "err");
+  } finally {
+    $("download-btn").disabled = false;
+    setTimeout(() => { show($("progress-wrap"), false); bar.style.width = "0%"; }, 1500);
+  }
+}
+
+async function downloadNovel(nums, formats, bar) {
+  const chaptersData = [];
+  {
     for (let i = 0; i < nums.length; i++) {
       const ch = nums[i];
       setStatus(`Глава ${ch.number} (${i + 1}/${nums.length})…`);
@@ -194,12 +254,61 @@ async function doDownload() {
     bar.style.width = "100%";
     const method = saved[0]?.method === "fs" ? `папку «${sub}»` : "Загрузки";
     setStatus(`Готово! Сохранено в ${method}. Файлов: ${saved.length}`, "ok");
-  } catch (e) {
-    setStatus("Ошибка: " + e.message, "err");
-  } finally {
-    $("download-btn").disabled = false;
-    setTimeout(() => { show($("progress-wrap"), false); bar.style.width = "0%"; }, 1500);
   }
+}
+
+// Манга/манхва: по главам тянем картинки и пакуем в CBZ/PDF/исходники.
+async function downloadManga(nums, formats, bar) {
+  const { slug, site } = state.ctx;
+  const titleStr = state.book?.rus_name || state.book?.name || slug;
+  const sub = safeName(titleStr);
+  const server = await fetchImageServer(site.id);
+
+  let savedCount = 0, lastMethod = "fs";
+  const totalChapters = nums.length;
+
+  for (let i = 0; i < totalChapters; i++) {
+    const ch = nums[i];
+    const padNum = String(parseFloat(ch.number)).padStart(3, "0");
+    setStatus(`Глава ${ch.number} (${i + 1}/${totalChapters}) — страницы…`);
+
+    const data = await fetchChapter(slug, site.id,
+      { number: ch.number, volume: ch.volume, bid: state.bid });
+    const urls = pageUrls(data, server);
+
+    // качаем все страницы главы
+    const images = [];
+    for (let p = 0; p < urls.length; p++) {
+      images.push(await fetchImage(urls[p]));
+      const chFrac = (i + (p + 1) / Math.max(urls.length, 1)) / totalChapters;
+      bar.style.width = `${Math.round(chFrac * 90)}%`;
+    }
+
+    const base = `Глава_${padNum}`;
+    for (const fmt of formats) {
+      if (fmt === "cbz") {
+        const { filename, blob } = buildCBZ(images, base);
+        const r = await saveBlob(blob, filename, sub); lastMethod = r.method; savedCount++;
+      } else if (fmt === "images") {
+        for (let p = 0; p < images.length; p++) {
+          const img = images[p];
+          const fn = `${String(p + 1).padStart(3, "0")}.${img.ext}`;
+          const r = await saveBlob(new Blob([img.bytes]), fn, `${sub}/${base}`);
+          lastMethod = r.method;
+        }
+        savedCount++;
+      } else if (fmt === "pdf") {
+        const jpegPages = [];
+        for (const img of images) jpegPages.push(await toJpegPage(img.bytes, img.type));
+        const { filename, blob } = buildMangaPDF(jpegPages, base);
+        const r = await saveBlob(blob, filename, sub); lastMethod = r.method; savedCount++;
+      }
+    }
+  }
+
+  bar.style.width = "100%";
+  const where = lastMethod === "fs" ? `папку «${sub}»` : "Загрузки";
+  setStatus(`Готово! Сохранено в ${where}. Глав: ${totalChapters}`, "ok");
 }
 
 // ---------- папка ----------
@@ -231,8 +340,6 @@ $("apply-range").addEventListener("click", () => {
   state.selected = new Set(state.view.filter(c => c.numberFloat >= lo && c.numberFloat <= hi).map(c => c.number));
   applySelectionToCheckboxes();
 });
-document.querySelectorAll('#format-section .formats input').forEach(i =>
-  i.addEventListener("change", updateCount));
 $("pick-folder").addEventListener("click", async () => {
   try { await pickDirectory(); await refreshFolderLabel(); setStatus("Папка выбрана", "ok"); }
   catch { /* отмена */ }

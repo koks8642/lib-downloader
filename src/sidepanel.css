@@ -45,8 +45,9 @@ main { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 12px;
 }
 .logo {
   width: 34px; height: 34px; border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent), #00b894);
+  background: var(--accent);
   color: #fff; display: grid; place-items: center; font-size: 18px; font-weight: 700;
+  transition: background .25s;
 }
 .titles h1 { margin: 0; font-size: 16px; font-weight: 700; }
 .subtitle { font-size: 11px; color: var(--muted); }

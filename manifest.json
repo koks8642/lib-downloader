@@ -14,7 +14,11 @@
     "*://*.slashlib.me/*",
     "*://*.yaoilib.me/*",
     "*://*.cdnlibs.org/*",
-    "*://*.imglib.info/*"
+    "*://*.imglib.info/*",
+    "*://*.mixlib.me/*",
+    "*://*.mangalib.me/*",
+    "*://*.hentaicdn.org/*",
+    "*://*.hentailib.me/*"
   ],
   "background": { "service_worker": "src/background.js" },
   "side_panel": { "default_path": "src/sidepanel.html" },

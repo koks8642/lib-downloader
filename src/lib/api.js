@@ -75,3 +75,26 @@ export async function fetchChapter(slug, siteId, { number, volume, bid }) {
   const data = await getJSON(`${API_HOST}/manga/${slug}/chapter?${q}`, siteId);
   return data.data || data;
 }
+
+// Базовый URL сервера картинок ("main") для нужного сайта.
+let _imgServerCache = new Map();
+export async function fetchImageServer(siteId) {
+  if (_imgServerCache.has(siteId)) return _imgServerCache.get(siteId);
+  const data = await getJSON(`${API_HOST}/constants?fields[]=imageServers`, siteId);
+  const servers = (data.data || data).imageServers || [];
+  const pick = servers.find(s => s.id === "main" && (s.site_ids || []).includes(Number(siteId)) && s.url)
+            || servers.find(s => (s.site_ids || []).includes(Number(siteId)) && s.url);
+  const url = pick ? pick.url.replace(/\/$/, "") : "https://img2.imglib.info";
+  _imgServerCache.set(siteId, url);
+  return url;
+}
+
+// Абсолютные URL страниц главы манги.
+export function pageUrls(chapter, imageServer) {
+  const pages = chapter.pages || [];
+  return pages.map(p => {
+    const path = p.url || (p.image ? `/${p.image}` : "");
+    if (/^https?:/.test(path)) return path;
+    return imageServer.replace(/\/$/, "") + path;
+  }).filter(Boolean);
+}

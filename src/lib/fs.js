@@ -53,7 +53,11 @@ export async function saveBlob(blob, filename, subfolder) {
   const dir = await getSavedDirectory();
   if (dir && supportsFSAccess() && (await ensurePermission(dir))) {
     let target = dir;
-    if (subfolder) target = await dir.getDirectoryHandle(subfolder, { create: true });
+    if (subfolder) {
+      for (const part of String(subfolder).split("/").filter(Boolean)) {
+        target = await target.getDirectoryHandle(part, { create: true });
+      }
+    }
     const fh = await target.getFileHandle(filename, { create: true });
     const w = await fh.createWritable();
     await w.write(blob);
