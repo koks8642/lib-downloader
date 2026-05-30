@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Lib Downloader — RanobeLib / MangaLib",
+  "version": "0.1.0",
+  "description": "Скачивание новелл и манги с сайтов группы Lib (RanobeLib, MangaLib и др.) в TXT, EPUB, FB2, JSON.",
+  "default_locale": "ru",
+  "permissions": ["sidePanel", "storage", "tabs", "downloads"],
+  "host_permissions": [
+    "*://*.ranobelib.me/*",
+    "*://*.mangalib.me/*",
+    "*://*.mangalib.org/*",
+    "*://*.hentailib.me/*",
+    "*://*.hentailib.org/*",
+    "*://*.slashlib.me/*",
+    "*://*.yaoilib.me/*",
+    "*://*.cdnlibs.org/*",
+    "*://*.imglib.info/*"
+  ],
+  "background": { "service_worker": "src/background.js" },
+  "side_panel": { "default_path": "src/sidepanel.html" },
+  "action": { "default_title": "Lib Downloader" },
+  "icons": {
+    "16": "src/icons/icon16.png",
+    "48": "src/icons/icon48.png",
+    "128": "src/icons/icon128.png"
+  }
+}

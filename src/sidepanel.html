@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lib Downloader</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="logo">⬇</div>
+    <div class="titles">
+      <h1>Lib Downloader</h1>
+      <span class="subtitle">RanobeLib · MangaLib · …</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Карточка книги / подсказка -->
+    <section id="book-card" class="card book-card hidden">
+      <img id="book-cover" class="cover" alt="">
+      <div class="book-meta">
+        <div id="book-title" class="book-title">—</div>
+        <div id="book-sub" class="book-sub"></div>
+        <span id="site-badge" class="badge"></span>
+      </div>
+    </section>
+
+    <section id="empty-hint" class="card hint">
+      <p>Откройте страницу тайтла на одном из сайтов группы&nbsp;Lib
+        (RanobeLib, MangaLib и&nbsp;др.) — панель сама всё подхватит.</p>
+      <button id="reload-tab" class="btn ghost small">Проверить вкладку</button>
+    </section>
+
+    <!-- Переводчик -->
+    <section id="branch-section" class="card hidden">
+      <label class="field-label" for="branch-select">Переводчик</label>
+      <select id="branch-select" class="select"></select>
+    </section>
+
+    <!-- Главы -->
+    <section id="chapters-section" class="card hidden">
+      <div class="row between">
+        <label class="field-label">Главы</label>
+        <span id="selected-count" class="muted">0 выбрано</span>
+      </div>
+
+      <div class="row gap">
+        <label class="check inline">
+          <input type="checkbox" id="select-all"> <span>Выбрать всё</span>
+        </label>
+      </div>
+
+      <div class="row gap range-row">
+        <span class="muted">с</span>
+        <input type="number" id="range-from" class="num" min="0" step="1" placeholder="1">
+        <span class="muted">по</span>
+        <input type="number" id="range-to" class="num" min="0" step="1" placeholder="∞">
+        <button id="apply-range" class="btn ghost small">Применить</button>
+      </div>
+
+      <ul id="chapter-list" class="chapter-list"></ul>
+    </section>
+
+    <!-- Форматы -->
+    <section id="format-section" class="card hidden">
+      <label class="field-label">Форматы экспорта</label>
+      <div class="formats">
+        <label class="check chip"><input type="checkbox" value="epub" checked><span>EPUB</span></label>
+        <label class="check chip"><input type="checkbox" value="txt"><span>TXT</span></label>
+        <label class="check chip"><input type="checkbox" value="fb2"><span>FB2</span></label>
+        <label class="check chip"><input type="checkbox" value="json"><span>JSON</span></label>
+      </div>
+      <label class="check inline mt">
+        <input type="checkbox" id="txt-per-chapter"><span>TXT — отдельным файлом на главу</span>
+      </label>
+    </section>
+
+    <!-- Папка -->
+    <section id="folder-section" class="card hidden">
+      <label class="field-label">Папка сохранения</label>
+      <div class="row between gap">
+        <span id="folder-name" class="folder-name muted">не выбрана → Загрузки</span>
+        <button id="pick-folder" class="btn ghost small">Выбрать…</button>
+      </div>
+      <p id="fs-note" class="note hidden">Этот браузер не умеет выбирать папку — файлы пойдут в «Загрузки».</p>
+    </section>
+  </main>
+
+  <footer class="app-footer hidden" id="footer">
+    <div id="progress-wrap" class="progress-wrap hidden">
+      <div id="progress-bar" class="progress-bar"></div>
+    </div>
+    <div id="status-line" class="status-line muted"></div>
+    <button id="download-btn" class="btn primary" disabled>Скачать</button>
+  </footer>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
