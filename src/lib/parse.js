@@ -4,7 +4,14 @@
 //   2) JSON-строка того же вида
 //   3) HTML-строка
 
-function escAttr(s) { return String(s).replace(/[<>&"]/g, c => ({ "<":"&lt;", ">":"&gt;", "&":"&amp;", '"':"&quot;" }[c])); }
+const SP = String.fromCharCode(32);   // обычный пробел
+// Любой горизонтальный пробельный символ (таб, обычный/неразрывный/юникод-пробелы),
+// но НЕ перевод строки. [^\S\n] = «пробельный, кроме \n».
+const WS = /[^\S\n]+/g;
+
+function escAttr(s) {
+  return String(s).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+}
 
 // ProseMirror -> массив абзацев (чистый текст, без разметки).
 function pmToParagraphs(node, acc, cur) {
@@ -29,15 +36,26 @@ function pmToParagraphs(node, acc, cur) {
   }
 }
 
+// Повторы пробельных символов → один обычный пробел; убрать отступы вокруг
+// переносов; не более одной пустой строки. Чинит большие отступы после тире
+// в диалогах («—\t\tПривет» → «— Привет»).
+function normalizeParagraph(p) {
+  return String(p)
+    .replace(WS, SP)
+    .replace(new RegExp(SP + "*\\n" + SP + "*", "g"), "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function htmlToParagraphs(html) {
-  let s = html
+  const s = html
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|h[1-6])>/gi, "")
+    .replace(/<\/(p|div|h[1-6])>/gi, "\n")
     .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ").replace(/&laquo;/g, "«").replace(/&raquo;/g, "»")
+    .replace(/&nbsp;/g, SP).replace(/&laquo;/g, "«").replace(/&raquo;/g, "»")
     .replace(/&mdash;/g, "—").replace(/&hellip;/g, "…").replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-  return s.split("").map(p => p.trim()).filter(Boolean);
+  return s.split("\n").map(normalizeParagraph).filter(Boolean);
 }
 
 // Главный экспорт: вернуть массив абзацев (строк) из любого вида контента.
@@ -45,7 +63,7 @@ export function contentToParagraphs(raw) {
   if (raw && typeof raw === "object") {
     const acc = [];
     pmToParagraphs(raw, acc, { buf: "" });
-    return acc.map(p => p.replace(/[ \t]+\n/g, "\n").trim()).filter(Boolean);
+    return acc.map(normalizeParagraph).filter(Boolean);
   }
   if (typeof raw === "string") {
     const s = raw.trim();
@@ -65,7 +83,7 @@ export function paragraphsToHTML(paras) {
   return paras.map(p => `<p>${escAttr(p)}</p>`).join("\n");
 }
 
-// Из манги: вытащить URL страниц. pages[] обычно: {url} или {slug} + сервер картинок.
+// Из манги: вытащить URL страниц.
 export function chapterImages(chapter, imageServer) {
   const pages = chapter.pages || chapter.images || [];
   return pages.map(p => {

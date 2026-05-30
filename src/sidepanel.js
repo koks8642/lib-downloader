@@ -130,7 +130,7 @@ async function loadCover(url) {
   const img = $("book-cover");
   if (!url) { show(img, false); return; }
   try {
-    const r = await fetch(url, { referrerPolicy: "no-referrer" });
+    const r = await fetch(url);
     if (!r.ok) throw new Error();
     const blob = await r.blob();
     if (img._url) URL.revokeObjectURL(img._url);

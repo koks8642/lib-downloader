@@ -5,7 +5,7 @@ const EXT_BY_TYPE = {
 };
 
 export async function fetchImage(url) {
-  const r = await fetch(url, { referrerPolicy: "no-referrer" });
+  const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status} (картинка)`);
   const buf = new Uint8Array(await r.arrayBuffer());
   const type = r.headers.get("content-type") || "image/jpeg";
