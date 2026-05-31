@@ -35,6 +35,18 @@ export function buildTXT(book) {
   return { filename: `${safeName(book.title)}.txt`, blob };
 }
 
+// ---------- Markdown ----------
+export function buildMD(book) {
+  const parts = [`# ${book.title}`];
+  if (book.author) parts.push(`*${book.author}*`);
+  for (const ch of book.chapters) {
+    parts.push("", `## ${chapterHeading(ch)}`, "");
+    parts.push(ch.paragraphs.join("\n\n"));
+  }
+  const blob = new Blob([parts.join("\n")], { type: "text/markdown;charset=utf-8" });
+  return { filename: `${safeName(book.title)}.md`, blob };
+}
+
 // ---------- JSON ----------
 export function buildJSON(book) {
   const data = {
@@ -162,6 +174,7 @@ ${ncxPoints}
 
 export const BUILDERS = {
   txt:  buildTXT,
+  md:   buildMD,
   json: buildJSON,
   fb2:  buildFB2,
   epub: buildEPUB,

@@ -13,6 +13,7 @@ const FORMATS = {
     { v: "epub", label: "EPUB", def: true },
     { v: "fb2", label: "FB2" },
     { v: "txt", label: "TXT" },
+    { v: "md", label: "MD" },
     { v: "json", label: "JSON" },
   ],
   manga: [
@@ -309,11 +310,11 @@ async function downloadNovel(nums, formats, bar) {
     setStatus("Формирую файлы…");
     let saved = [];
     for (const fmt of formats) {
-      if (fmt === "txt" && $("txt-per-chapter").checked) {
+      if ((fmt === "txt" || fmt === "md") && $("txt-per-chapter").checked) {
         for (const ch of chaptersData) {
           const single = { ...book, chapters: [ch] };
-          const { blob } = BUILDERS.txt(single);
-          const fn = `Глава_${String(parseFloat(ch.number)).padStart(3, "0")}.txt`;
+          const { blob } = BUILDERS[fmt](single);
+          const fn = `Глава_${String(parseFloat(ch.number)).padStart(3, "0")}.${fmt}`;
           const r = await saveBlob(blob, fn, sub); saved.push(r);
         }
       } else {
