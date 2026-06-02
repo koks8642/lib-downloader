@@ -11,7 +11,7 @@ export function buildCBZ(images, baseName) {
     name: `${pad(i + 1)}.${img.ext || "jpg"}`,
     data: img.bytes,
   }));
-  return { filename: `${baseName}.cbz`, blob: makeZip(entries) };
+  return { filename: `${baseName}.cbz`, blob: makeZip(entries, "application/vnd.comicbook+zip") };
 }
 
 // PDF из картинок. jpegPages: [{jpeg:Uint8Array, w, h}] (готовые JPEG).

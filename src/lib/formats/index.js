@@ -167,7 +167,7 @@ ${ncxPoints}
     { name: "OEBPS/toc.ncx", data: ncx },
     ...chFiles.map(c => ({ name: `OEBPS/${c.href}`, data: c.xhtml })),
   ];
-  const blob = makeZip(entries);
+  const blob = makeZip(entries, "application/epub+zip");
   return { filename: `${safeName(book.title)}.epub`, blob };
 }
 

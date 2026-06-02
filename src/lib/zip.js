@@ -24,7 +24,9 @@ function toBytes(data) {
 }
 
 // entries: [{ name, data }]  (data: string | Uint8Array | ArrayBuffer)
-export function makeZip(entries) {
+// mime — тип Blob. ВАЖНО: для EPUB/CBZ нужен «родной» MIME формата, иначе
+// chrome.downloads видит generic application/zip и переименовывает .epub/.cbz → .zip.
+export function makeZip(entries, mime = "application/zip") {
   const enc = new TextEncoder();
   const chunks = [];
   const central = [];
@@ -90,5 +92,5 @@ export function makeZip(entries) {
   end.setUint16(20, 0, true);
 
   return new Blob([...chunks, ...central, new Uint8Array(end.buffer)],
-    { type: "application/zip" });
+    { type: mime });
 }
