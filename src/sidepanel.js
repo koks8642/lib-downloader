@@ -23,6 +23,14 @@ const FORMATS = {
   ],
 };
 
+// Имя подпапки под каждый формат — внутри папки тайтла файлы раскладываются
+// по формату: Lib Downloader/<Тайтл>/EPUB/…, /TXT/…, /CBZ/… и т.д.
+const FORMAT_DIR = {
+  epub: "EPUB", fb2: "FB2", txt: "TXT", md: "MD", json: "JSON",
+  cbz: "CBZ", pdf: "PDF", images: "Картинки",
+};
+const fmtDir = (sub, fmt) => `${sub}/${FORMAT_DIR[fmt] || fmt.toUpperCase()}`;
+
 // Затемнить hex-цвет на коэффициент k (0..1).
 function shade(hex, k) {
   const n = parseInt(hex.slice(1), 16);
@@ -342,16 +350,17 @@ async function downloadNovel(nums, formats, bar) {
     setStatus("Формирую файлы…");
     let saved = [];
     for (const fmt of formats) {
+      const dir = fmtDir(sub, fmt);
       if ((fmt === "txt" || fmt === "md") && $("txt-per-chapter").checked) {
         for (const ch of chaptersData) {
           const single = { ...book, chapters: [ch] };
           const { blob } = BUILDERS[fmt](single);
           const fn = `Глава_${String(parseFloat(ch.number)).padStart(3, "0")}.${fmt}`;
-          const r = await saveBlob(blob, fn, sub); saved.push(r);
+          const r = await saveBlob(blob, fn, dir); saved.push(r);
         }
       } else {
         const { filename, blob } = BUILDERS[fmt](book);
-        const r = await saveBlob(blob, filename, sub); saved.push(r);
+        const r = await saveBlob(blob, filename, dir); saved.push(r);
       }
     }
     bar.style.width = "100%";
@@ -398,12 +407,12 @@ async function downloadManga(nums, formats, bar) {
     for (const fmt of formats) {
       if (fmt === "cbz") {
         const { filename, blob } = buildCBZ(images, base);
-        const r = await saveBlob(blob, filename, sub); lastMethod = r.method; savedCount++;
+        const r = await saveBlob(blob, filename, fmtDir(sub, "cbz")); lastMethod = r.method; savedCount++;
       } else if (fmt === "images") {
         for (let p = 0; p < images.length; p++) {
           const img = images[p];
           const fn = `${String(p + 1).padStart(3, "0")}.${img.ext}`;
-          const r = await saveBlob(new Blob([img.bytes]), fn, `${sub}/${base}`);
+          const r = await saveBlob(new Blob([img.bytes]), fn, `${fmtDir(sub, "images")}/${base}`);
           lastMethod = r.method;
         }
         savedCount++;
@@ -420,7 +429,7 @@ async function downloadManga(nums, formats, bar) {
           }
         }
         const { filename, blob } = buildMangaPDF(jpegPages, base);
-        const r = await saveBlob(blob, filename, sub); lastMethod = r.method; savedCount++;
+        const r = await saveBlob(blob, filename, fmtDir(sub, "pdf")); lastMethod = r.method; savedCount++;
       }
     }
   }
