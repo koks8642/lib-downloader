@@ -9,7 +9,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 INCLUDE_FILES = ["manifest.json"]
 INCLUDE_DIRS = ["src"]
 # что НИКОГДА не включаем
-SKIP = {".png.import"}
+# mobi.js — заготовка для роадмапа, в UI не используется (не везём в пакет)
+SKIP = {".png.import", "mobi.js"}
 SKIP_EXT = set()
 
 ver = json.load(open(os.path.join(ROOT, "manifest.json"), encoding="utf-8"))["version"]

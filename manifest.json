@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lib Downloader — RanobeLib / MangaLib",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Скачивание новелл (EPUB/FB2/TXT/JSON) и манги/манхвы (CBZ/PDF/картинки) с сайтов группы Lib. Выбор переводчика, диапазон глав, выбор папки.",
   "permissions": ["sidePanel", "storage", "tabs", "downloads", "declarativeNetRequestWithHostAccess"],
   "host_permissions": [

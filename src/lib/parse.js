@@ -9,10 +9,6 @@ const SP = String.fromCharCode(32);   // обычный пробел
 // но НЕ перевод строки. [^\S\n] = «пробельный, кроме \n».
 const WS = /[^\S\n]+/g;
 
-function escAttr(s) {
-  return String(s).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
-}
-
 // ProseMirror -> массив абзацев (чистый текст, без разметки).
 function pmToParagraphs(node, acc, cur) {
   if (Array.isArray(node)) { for (const n of node) pmToParagraphs(n, acc, cur); return; }
@@ -73,23 +69,4 @@ export function contentToParagraphs(raw) {
     return htmlToParagraphs(s);
   }
   return [];
-}
-
-export function paragraphsToText(paras) {
-  return paras.join("\n\n");
-}
-
-export function paragraphsToHTML(paras) {
-  return paras.map(p => `<p>${escAttr(p)}</p>`).join("\n");
-}
-
-// Из манги: вытащить URL страниц.
-export function chapterImages(chapter, imageServer) {
-  const pages = chapter.pages || chapter.images || [];
-  return pages.map(p => {
-    if (typeof p === "string") return p;
-    if (p.url && /^https?:/.test(p.url)) return p.url;
-    const path = p.url || p.slug || "";
-    return imageServer ? imageServer.replace(/\/$/, "") + path : path;
-  }).filter(Boolean);
 }
