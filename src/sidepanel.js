@@ -31,12 +31,21 @@ function shade(hex, k) {
   const b = Math.round((n & 255) * (1 - k));
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 }
+// Контрастный текст на фоне акцента: тёмный на светлом акценте (напр. оранжевый
+// MangaLib), белый на тёмном. Считаем по воспринимаемой яркости.
+function onAccent(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const L = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return L > 0.62 ? "#0b0c0e" : "#ffffff";
+}
 function applyTheme(color) {
   if (!color) return;
   const root = document.documentElement.style;
   root.setProperty("--accent", color);
   root.setProperty("--accent-press", shade(color, 0.15));
   root.setProperty("--accent-soft", color + "22"); // ~13% alpha
+  root.setProperty("--on-accent", onAccent(color));
 }
 
 const $ = (id) => document.getElementById(id);
@@ -215,12 +224,35 @@ function applySelectionToCheckboxes() {
   updateCount();
 }
 
+// Найти вкладку с открытым тайтлом Lib.
+// В side-panel (Chrome/Edge) активная вкладка фокус-окна — это сайт.
+// В попап-режиме (Яндекс и др.) фокус-окно — сама панель, поэтому ищем
+// активную (а затем любую) вкладку-либ среди обычных окон.
+async function getTargetTab() {
+  try {
+    const [focused] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (focused && parseTab(focused.url || "")) return focused;
+  } catch { /* ignore */ }
+  try {
+    const wins = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+    for (const w of wins) {
+      const act = (w.tabs || []).find(t => t.active && parseTab(t.url || ""));
+      if (act) return act;
+    }
+    for (const w of wins) {
+      const any = (w.tabs || []).find(t => parseTab(t.url || ""));
+      if (any) return any;
+    }
+  } catch { /* ignore */ }
+  // запасной вариант — вернём активную вкладку фокус-окна (может быть не-либ)
+  try { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return t || null; }
+  catch { return null; }
+}
+
 // ---------- загрузка данных ----------
 async function detectAndLoad() {
   setStatus("Определяю вкладку…");
-  let tab;
-  try { [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); }
-  catch { tab = null; }
+  const tab = await getTargetTab();
   const ctx = tab ? parseTab(tab.url || "") : null;
   lastKey = ctxKey(ctx);
   if (!ctx || !ctx.slug) {
@@ -456,9 +488,7 @@ function ctxKey(ctx) {
   return ctx && ctx.slug ? `${ctx.site.id}:${ctx.slug}` : "none";
 }
 async function maybeReload() {
-  let tab;
-  try { [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); }
-  catch { return; }
+  const tab = await getTargetTab();
   const ctx = tab ? parseTab(tab.url || "") : null;
   const key = ctxKey(ctx);
   if (key === lastKey) return;     // тайтл/сайт не изменился — не дёргаем

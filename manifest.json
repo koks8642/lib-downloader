@@ -1,17 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Lib Downloader — RanobeLib / MangaLib",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Скачивание новелл (EPUB/FB2/TXT/JSON) и манги/манхвы (CBZ/PDF/картинки) с сайтов группы Lib. Выбор переводчика, диапазон глав, выбор папки.",
-  "permissions": ["sidePanel", "storage", "tabs", "downloads", "declarativeNetRequestWithHostAccess"],
+  "permissions": ["sidePanel", "storage", "tabs", "downloads", "scripting", "declarativeNetRequestWithHostAccess"],
   "host_permissions": [
     "*://*.ranobelib.me/*",
+    "*://*.ranobelib.org/*",
     "*://*.mangalib.me/*",
     "*://*.mangalib.org/*",
     "*://*.hentailib.me/*",
     "*://*.hentailib.org/*",
     "*://*.slashlib.me/*",
+    "*://*.slashlib.org/*",
     "*://*.yaoilib.me/*",
+    "*://*.yaoilib.org/*",
     "*://*.cdnlibs.org/*",
     "*://*.imglib.info/*",
     "*://*.mixlib.me/*",
@@ -20,6 +23,31 @@
   "background": { "service_worker": "src/background.js" },
   "side_panel": { "default_path": "src/sidepanel.html" },
   "action": { "default_title": "Lib Downloader — открыть панель" },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.ranobelib.me/*", "*://*.ranobelib.org/*",
+        "*://*.mangalib.me/*", "*://*.mangalib.org/*",
+        "*://*.hentailib.me/*", "*://*.hentailib.org/*",
+        "*://*.slashlib.me/*", "*://*.slashlib.org/*",
+        "*://*.yaoilib.me/*", "*://*.yaoilib.org/*"
+      ],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/sidepanel.html"],
+      "matches": [
+        "*://*.ranobelib.me/*", "*://*.ranobelib.org/*",
+        "*://*.mangalib.me/*", "*://*.mangalib.org/*",
+        "*://*.hentailib.me/*", "*://*.hentailib.org/*",
+        "*://*.slashlib.me/*", "*://*.slashlib.org/*",
+        "*://*.yaoilib.me/*", "*://*.yaoilib.org/*"
+      ]
+    }
+  ],
   "icons": {
     "16": "src/icons/icon16.png",
     "48": "src/icons/icon48.png",

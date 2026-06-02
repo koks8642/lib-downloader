@@ -2,15 +2,50 @@
 
 const EXT_BY_TYPE = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+  "image/avif": "avif",
 };
+const MIME_BY_EXT = {
+  jpg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", avif: "image/avif",
+};
+
+// Определить формат по сигнатуре (magic bytes). Надёжнее content-type и URL:
+// серверы Lib часто отдают картинки с неверным/пустым Content-Type, из-за чего
+// файл сохранялся как .txt. Байты не врут.
+function sniffExt(b) {
+  if (!b || b.length < 12) return null;
+  // RIFF .... WEBP
+  if (b[0]===0x52&&b[1]===0x49&&b[2]===0x46&&b[3]===0x46 &&
+      b[8]===0x57&&b[9]===0x45&&b[10]===0x42&&b[11]===0x50) return "webp";
+  // JPEG: FF D8 FF
+  if (b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF) return "jpg";
+  // PNG: 89 50 4E 47
+  if (b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47) return "png";
+  // GIF: "GIF8"
+  if (b[0]===0x47&&b[1]===0x49&&b[2]===0x46&&b[3]===0x38) return "gif";
+  // AVIF/HEIF: ....ftyp + brand (avif/avis/heic...)
+  if (b[4]===0x66&&b[5]===0x74&&b[6]===0x79&&b[7]===0x70) {
+    const brand = String.fromCharCode(b[8],b[9],b[10],b[11]).toLowerCase();
+    if (brand.startsWith("avi")) return "avif";
+  }
+  return null;
+}
 
 export async function fetchImage(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status} (картинка)`);
-  const buf = new Uint8Array(await r.arrayBuffer());
-  const type = r.headers.get("content-type") || "image/jpeg";
-  const ext = EXT_BY_TYPE[type.split(";")[0].trim()] || (url.match(/\.(\w+)(?:\?|$)/)?.[1]) || "jpg";
-  return { bytes: buf, ext, type };
+  const bytes = new Uint8Array(await r.arrayBuffer());
+
+  // 1) сигнатура → 2) content-type → 3) расширение в URL → 4) jpg
+  let ext = sniffExt(bytes);
+  if (!ext) {
+    const ct = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    ext = EXT_BY_TYPE[ct]
+       || (url.match(/\.(jpe?g|png|webp|gif|avif)(?:[?#]|$)/i)?.[1] || "").toLowerCase()
+       || "jpg";
+    if (ext === "jpeg") ext = "jpg";
+  }
+  const type = MIME_BY_EXT[ext] || "image/jpeg";
+  return { bytes, ext, type };
 }
 
 async function decode(bytes, type) {
