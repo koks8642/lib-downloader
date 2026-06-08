@@ -1,4 +1,5 @@
 // Загрузка и подготовка изображений страниц.
+import { rateLimitedFetch } from "./api.js";
 
 const EXT_BY_TYPE = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
@@ -31,7 +32,7 @@ function sniffExt(b) {
 }
 
 export async function fetchImage(url) {
-  const r = await fetch(url);
+  const r = await rateLimitedFetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status} (картинка)`);
   const bytes = new Uint8Array(await r.arrayBuffer());
 

@@ -136,7 +136,7 @@ function renderBranches() {
     sel.appendChild(o);
   }
   // выбрать ветку из URL, либо самую полную
-  const initial = state.ctx.bid && state.branches.some(b => b.bid === state.ctx.bid)
+  const initial = state.ctx.bid != null && state.branches.some(b => b.bid === state.ctx.bid)
     ? state.ctx.bid : (state.branches[0]?.bid ?? null);
   sel.value = String(initial);
   state.bid = initial;
@@ -146,15 +146,23 @@ function renderBranches() {
 // с фолбэком на прямой src. Прячем, если не вышло.
 async function loadCover(url) {
   const img = $("book-cover");
-  if (!url) { show(img, false); return; }
+  const revokeCover = () => {
+    if (!img._url) return;
+    URL.revokeObjectURL(img._url);
+    img._url = null;
+  };
+  if (!url) { revokeCover(); show(img, false); return; }
   try {
     const r = await fetch(url);
     if (!r.ok) throw new Error();
     const blob = await r.blob();
-    if (img._url) URL.revokeObjectURL(img._url);
+    revokeCover();
     img._url = URL.createObjectURL(blob);
-    img.src = img._url; show(img, true);
+    img.onload = () => { show(img, true); revokeCover(); };
+    img.onerror = () => { show(img, false); revokeCover(); };
+    img.src = img._url;
   } catch {
+    revokeCover();
     img.onerror = () => show(img, false);
     img.onload = () => show(img, true);
     img.src = url; show(img, true);
@@ -376,9 +384,15 @@ async function downloadManga(nums, formats, bar) {
   const titleStr = state.book?.rus_name || state.book?.name || slug;
   const sub = safeName(titleStr);
   const server = await fetchImageServer(site.id);
+  const wants = {
+    cbz: formats.includes("cbz"),
+    images: formats.includes("images"),
+    pdf: formats.includes("pdf"),
+  };
 
-  let savedCount = 0, lastMethod = "fs", skipped = 0;
+  let skipped = 0, empty = 0;
   const totalChapters = nums.length;
+  const q = (state.settings.jpegQuality || 90) / 100;
 
   for (let i = 0; i < totalChapters; i++) {
     const ch = nums[i];
@@ -394,49 +408,51 @@ async function downloadManga(nums, formats, bar) {
       throw e;
     }
     const urls = pageUrls(data, server);
+    if (!urls.length) { empty++; continue; }
 
-    // качаем все страницы главы
-    const images = [];
+    const base = `Глава_${padNum}`;
+    const cbzImages = wants.cbz ? [] : null;
+    const jpegPages = wants.pdf ? [] : null;
+    const imageDir = `${fmtDir(sub, "images")}/${base}`;
+
     for (let p = 0; p < urls.length; p++) {
-      images.push(await fetchImage(urls[p]));
+      const img = await fetchImage(urls[p]);
+      const pageName = `${String(p + 1).padStart(3, "0")}.${img.ext}`;
+
+      if (wants.images) {
+        await saveBlob(new Blob([img.bytes], { type: img.type }), pageName, imageDir);
+      }
+      if (cbzImages) {
+        cbzImages.push({ ext: img.ext, bytes: img.bytes });
+      }
+      if (jpegPages) {
+        if (state.settings.autocrop) {
+          const parts = await splitToJpegPages(img.bytes, img.type,
+            { enabled: true, ratio: state.settings.autocropRatio, quality: q });
+          jpegPages.push(...parts);
+        } else {
+          jpegPages.push(await toJpegPage(img.bytes, img.type, q));
+        }
+      }
+
       const chFrac = (i + (p + 1) / Math.max(urls.length, 1)) / totalChapters;
       bar.style.width = `${Math.round(chFrac * 90)}%`;
     }
 
-    const base = `Глава_${padNum}`;
-    for (const fmt of formats) {
-      if (fmt === "cbz") {
-        const { filename, blob } = buildCBZ(images, base);
-        const r = await saveBlob(blob, filename, fmtDir(sub, "cbz")); lastMethod = r.method; savedCount++;
-      } else if (fmt === "images") {
-        for (let p = 0; p < images.length; p++) {
-          const img = images[p];
-          const fn = `${String(p + 1).padStart(3, "0")}.${img.ext}`;
-          const r = await saveBlob(new Blob([img.bytes]), fn, `${fmtDir(sub, "images")}/${base}`);
-          lastMethod = r.method;
-        }
-        savedCount++;
-      } else if (fmt === "pdf") {
-        const q = (state.settings.jpegQuality || 90) / 100;
-        const jpegPages = [];
-        for (const img of images) {
-          if (state.settings.autocrop) {
-            const parts = await splitToJpegPages(img.bytes, img.type,
-              { enabled: true, ratio: state.settings.autocropRatio, quality: q });
-            jpegPages.push(...parts);
-          } else {
-            jpegPages.push(await toJpegPage(img.bytes, img.type, q));
-          }
-        }
-        const { filename, blob } = buildMangaPDF(jpegPages, base);
-        const r = await saveBlob(blob, filename, fmtDir(sub, "pdf")); lastMethod = r.method; savedCount++;
-      }
+    if (cbzImages) {
+      const { filename, blob } = buildCBZ(cbzImages, base);
+      await saveBlob(blob, filename, fmtDir(sub, "cbz"));
+    }
+    if (jpegPages) {
+      const { filename, blob } = buildMangaPDF(jpegPages, base);
+      await saveBlob(blob, filename, fmtDir(sub, "pdf"));
     }
   }
 
   bar.style.width = "100%";
   const skip = skipped ? ` · пропущено платных: ${skipped}` : "";
-  setStatus(`Готово · глав: ${totalChapters - skipped}${skip} · в «${destinationLabel(titleStr)}»`, "ok");
+  const emptyMsg = empty ? ` · пустых: ${empty}` : "";
+  setStatus(`Готово · глав: ${totalChapters - skipped - empty}${skip}${emptyMsg} · в «${destinationLabel(titleStr)}»`, "ok");
 }
 
 // ---------- события ----------
@@ -494,7 +510,7 @@ function bindSettingsUI() {
 // ---------- авто-обновление при переходах между тайтлами ----------
 let lastKey = "__init__";
 function ctxKey(ctx) {
-  return ctx && ctx.slug ? `${ctx.site.id}:${ctx.slug}` : "none";
+  return ctx && ctx.slug ? `${ctx.site.id}:${ctx.slug}:${ctx.bid ?? "none"}` : "none";
 }
 async function maybeReload() {
   const tab = await getTargetTab();

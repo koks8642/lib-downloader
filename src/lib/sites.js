@@ -46,6 +46,7 @@ export function parseTab(url) {
     if (/^\d+--/.test(s)) { slug = s; break; }
   }
   // bid из query (?bid=...) если есть
-  const bid = u.searchParams.get("bid");
-  return { host: u.hostname, site, slug, bid: bid ? Number(bid) : null, url };
+  const rawBid = u.searchParams.get("bid");
+  const bid = rawBid == null || rawBid === "" ? null : Number(rawBid);
+  return { host: u.hostname, site, slug, bid: Number.isFinite(bid) ? bid : null, url };
 }

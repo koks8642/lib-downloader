@@ -3,6 +3,7 @@
 // Фолбэк (если нет chrome.downloads, напр. дев-страница) — <a download>.
 
 const ROOT = "Lib Downloader";
+const FALLBACK_REVOKE_MS = 60 * 60 * 1000;
 
 function sanitizeSegment(s) {
   return String(s).replace(/[\\/:*?"<>|]+/g, "_").replace(/\.+$/g, "").trim().slice(0, 120) || "файл";
@@ -22,6 +23,37 @@ function hasDownloads() {
   return typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.download;
 }
 
+function safeRevoke(url) {
+  try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+}
+
+function revokeWhenDownloadEnds(id, url) {
+  if (!chrome.downloads.onChanged) {
+    setTimeout(() => safeRevoke(url), FALLBACK_REVOKE_MS);
+    return;
+  }
+
+  let done = false;
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    chrome.downloads.onChanged.removeListener(onChanged);
+    safeRevoke(url);
+  };
+  const onChanged = (delta) => {
+    if (delta.id !== id) return;
+    if (delta.state?.current === "complete" || delta.error?.current) cleanup();
+  };
+
+  chrome.downloads.onChanged.addListener(onChanged);
+  if (chrome.downloads.search) {
+    chrome.downloads.search({ id }).then((items) => {
+      const item = items && items[0];
+      if (item && (item.state === "complete" || item.error)) cleanup();
+    }).catch(() => {});
+  }
+}
+
 export async function saveBlob(blob, filename, subfolder) {
   const rel = buildPath(filename, subfolder);
   const url = URL.createObjectURL(blob);
@@ -36,8 +68,7 @@ export async function saveBlob(blob, filename, subfolder) {
             if (err) rej(new Error(err.message)); else res(id);
           }
         );
-      });
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      }).then((id) => revokeWhenDownloadEnds(id, url));
       return { method: "download", path: rel };
     } catch (e) {
       // упадём в фолбэк ниже
@@ -48,7 +79,7 @@ export async function saveBlob(blob, filename, subfolder) {
   const a = document.createElement("a");
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  setTimeout(() => safeRevoke(url), FALLBACK_REVOKE_MS);
   return { method: "download", path: filename };
 }
 

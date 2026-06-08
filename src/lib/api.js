@@ -31,35 +31,49 @@ export function setRateLimit(rpm) { limiter.setRpm(rpm); }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function getJSON(url, siteId, { retries = 3 } = {}) {
+function retryAfterSeconds(r, attempt) {
+  const ra = r.headers.get("retry-after");
+  const secs = Number(ra);
+  if (Number.isFinite(secs) && secs > 0) return secs;
+  const when = Date.parse(ra);
+  if (!Number.isNaN(when)) return Math.max(1, Math.ceil((when - Date.now()) / 1000));
+  return 2 * (attempt + 1);
+}
+
+export async function rateLimitedFetch(url, init = {}, { retries = 3, retryServerErrors = true } = {}) {
   for (let attempt = 0; ; attempt++) {
     await limiter.wait();
-    let r;
     try {
-      r = await fetch(url, { headers: headers(siteId) });
+      const r = await fetch(url, init);
+      if (r.status === 429) {
+        if (attempt < retries) { await sleep(retryAfterSeconds(r, attempt) * 1000); continue; }
+        throw new Error("429: слишком много запросов");
+      }
+      if (!r.ok) {
+        if (retryServerErrors && r.status >= 500 && attempt < retries) {
+          await sleep(800 * (attempt + 1));
+          continue;
+        }
+      }
+      return r;
     } catch (e) {
       if (attempt < retries) { await sleep(800 * (attempt + 1)); continue; }
       throw e;
     }
-    if (r.status === 429) {
-      // сервер просит подождать
-      const ra = Number(r.headers.get("retry-after")) || (2 * (attempt + 1));
-      if (attempt < retries) { await sleep(ra * 1000); continue; }
-      throw new Error("429: слишком много запросов");
-    }
-    if (!r.ok) {
-      if (r.status >= 500 && attempt < retries) { await sleep(800 * (attempt + 1)); continue; }
-      throw new Error(`HTTP ${r.status}`);
-    }
-    // Заблокированные главы отдают HTML вместо JSON.
-    const ct = r.headers.get("content-type") || "";
-    if (!ct.includes("json")) {
-      const text = await r.text();
-      if (text.trimStart().startsWith("<")) throw new LockedError();
-      try { return JSON.parse(text); } catch { throw new LockedError(); }
-    }
-    return r.json();
   }
+}
+
+async function getJSON(url, siteId, { retries = 3 } = {}) {
+  const r = await rateLimitedFetch(url, { headers: headers(siteId) }, { retries });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  // Заблокированные главы отдают HTML вместо JSON.
+  const ct = r.headers.get("content-type") || "";
+  if (!ct.includes("json")) {
+    const text = await r.text();
+    if (text.trimStart().startsWith("<")) throw new LockedError();
+    try { return JSON.parse(text); } catch { throw new LockedError(); }
+  }
+  return r.json();
 }
 
 // Инфо о книге (название, обложка). Пробуем дотянуть автора/описание через
@@ -84,10 +98,18 @@ export async function fetchChapters(slug, siteId) {
 // Сводка по веткам (переводчикам): bid -> {name, count}.
 export function branchesFromChapters(chapters) {
   const map = new Map();
+  let looseCount = 0;
   for (const ch of chapters) {
-    for (const br of ch.branches || []) {
+    const branches = ch.branches || [];
+    if (!branches.length) {
+      looseCount += 1;
+      continue;
+    }
+    let sawRealBranch = false;
+    for (const br of branches) {
       const bid = br.branch_id;
       if (bid == null) continue;
+      sawRealBranch = true;
       const teams = br.teams || [];
       const name = teams.length ? teams.map(t => t.name).join(", ") : "Без команды";
       const cur = map.get(bid) || { bid, name, count: 0 };
@@ -95,9 +117,13 @@ export function branchesFromChapters(chapters) {
       if (cur.name === "Без команды" && name !== "Без команды") cur.name = name;
       map.set(bid, cur);
     }
+    if (!sawRealBranch) looseCount += 1;
   }
-  // Спец-вариант: ветка по умолчанию (одиночные главы без branch_id)
-  return [...map.values()].sort((a, b) => b.count - a.count);
+  const branches = [...map.values()].sort((a, b) => b.count - a.count);
+  if (looseCount > 0) {
+    branches.push({ bid: null, name: "Все главы", count: chapters.length });
+  }
+  return branches;
 }
 
 // Определить, заблокирована ли ветка (платный ранний доступ).
